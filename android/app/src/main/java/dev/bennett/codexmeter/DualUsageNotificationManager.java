@@ -48,10 +48,11 @@ final class DualUsageNotificationManager {
         String fiveResetTime = formatResetTime(fiveHour, observedAt);
         String longResetTime = formatResetTime(longWindow, observedAt);
         String processMode = ProcessNotificationMode.current(context);
-        List<CalendarProcess> processes = CalendarProcessReader.active(context, now);
-        List<CalendarProcess> finished = CalendarProcessReader.recentlyFinished(context, now);
+        List<CalendarProcess> observed = CalendarProcessReader.observed(context, now);
+        List<CalendarProcess> processes = CalendarProcessReader.active(observed, now);
+        List<CalendarProcess> finished = CalendarProcessReader.recentlyFinished(observed, now);
         List<IdleProcessState.IdleRole> idleRoles =
-                IdleProcessState.synchronize(context, processes, finished, now);
+                IdleProcessState.synchronize(context, processes, finished, observed, now);
         IdleReminderManager.sync(context, processes, idleRoles, now);
 
         try {
