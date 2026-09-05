@@ -54,6 +54,7 @@ public final class CodexMeterApplication extends Application
     public void onActivityResumed(Activity activity) {
         DiagnosticLog.info(this, "screen", "resumed",
                 "activity", activity.getClass().getSimpleName());
+        Branding.apply(activity);
         HomeVersionLabel.apply(activity);
         // Settings can start the native monitor from cached usage without a network refresh.
         // Re-assert the compact shade presentation whenever the user returns to a screen.
