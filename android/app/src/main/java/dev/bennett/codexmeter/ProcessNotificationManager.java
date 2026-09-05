@@ -81,6 +81,32 @@ final class ProcessNotificationManager {
         }
     }
 
+    /** One-line collapsed process summary shared by combined, grouped, and one-each modes. */
+    static String collapsedSummary(List<CalendarProcess> processes,
+            List<IdleProcessState.IdleRole> idleRoles, long nowMillis) {
+        int activeCount = processes == null ? 0 : processes.size();
+        int idleCount = idleRoles == null ? 0 : idleRoles.size();
+        int total = activeCount + idleCount;
+        if (activeCount > 0) {
+            CalendarProcess process = processes.get(0);
+            StringBuilder summary = new StringBuilder(compactLabel(
+                    process.role, process.topic, process.project));
+            appendSummaryPart(summary, process.remainingPercent(nowMillis) + "%");
+            appendSummaryPart(summary, formatRemaining(process.endMillis - nowMillis));
+            appendMore(summary, total - 1);
+            return summary.toString();
+        }
+        if (idleCount > 0) {
+            IdleProcessState.IdleRole idle = idleRoles.get(0);
+            StringBuilder summary = new StringBuilder(compactLabel(
+                    idle.role, idle.topic, idle.project));
+            appendSummaryPart(summary, "idle " + formatIdle(nowMillis - idle.lastFinishedMillis));
+            appendMore(summary, total - 1);
+            return summary.toString();
+        }
+        return "";
+    }
+
     private static void syncPerProcess(Context context, NotificationManager manager,
             List<CalendarProcess> processes, List<IdleProcessState.IdleRole> idleRoles,
             long nowMillis) {
@@ -136,21 +162,22 @@ final class ProcessNotificationManager {
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent contentIntent = PendingIntent.getActivity(context, REQUEST_CONTENT, open,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.notification_processes);
         int textColor = textColor(context);
         int activeCount = processes == null ? 0 : processes.size();
         int idleCount = idleRoles == null ? 0 : idleRoles.size();
-        views.setTextViewText(R.id.notification_processes_title, title);
-        views.setTextColor(R.id.notification_processes_title, textColor);
-        views.setTextViewText(R.id.notification_processes_count,
-                countLabel(activeCount, idleCount));
-        views.setTextColor(R.id.notification_processes_count, textColor);
-        addRows(context, views, R.id.notification_processes_container,
+        String summary = collapsedSummary(processes, idleRoles, nowMillis);
+
+        RemoteViews compact = new RemoteViews(context.getPackageName(),
+                R.layout.notification_processes);
+        bindHeader(compact, title, activeCount, idleCount, summary, textColor);
+
+        RemoteViews expanded = new RemoteViews(context.getPackageName(),
+                R.layout.notification_processes_expanded);
+        bindHeader(expanded, title, activeCount, idleCount, summary, textColor);
+        addRows(context, expanded, R.id.notification_processes_container,
                 processes, idleRoles, nowMillis);
 
-        String content = activeCount > 0
-                ? activeCount + (activeCount == 1 ? " active" : " active")
-                : idleCount + (idleCount == 1 ? " idle" : " idle");
+        String content = summary.isEmpty() ? countLabel(activeCount, idleCount) : summary;
         return new Notification.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle(title)
@@ -163,9 +190,22 @@ final class ProcessNotificationManager {
                 .setColor(Color.rgb(3, 129, 254))
                 .setShowWhen(false)
                 .setStyle(new Notification.DecoratedCustomViewStyle())
-                .setCustomContentView(views)
-                .setCustomBigContentView(views)
+                .setCustomContentView(compact)
+                .setCustomBigContentView(expanded)
                 .build();
+    }
+
+    private static void bindHeader(RemoteViews views, String title, int activeCount,
+            int idleCount, String summary, int textColor) {
+        views.setTextViewText(R.id.notification_processes_title, title);
+        views.setTextColor(R.id.notification_processes_title, textColor);
+        views.setTextViewText(R.id.notification_processes_count,
+                countLabel(activeCount, idleCount));
+        views.setTextColor(R.id.notification_processes_count, textColor);
+        views.setTextViewText(R.id.notification_process_summary, summary);
+        views.setTextColor(R.id.notification_process_summary, textColor);
+        views.setViewVisibility(R.id.notification_process_summary,
+                summary.isEmpty() ? View.GONE : View.VISIBLE);
     }
 
     private static RemoteViews buildActiveRow(Context context, CalendarProcess process,
@@ -233,6 +273,35 @@ final class ProcessNotificationManager {
         return (context.getResources().getConfiguration().uiMode
                 & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
                 ? Color.WHITE : Color.rgb(32, 33, 36);
+    }
+
+    private static String compactLabel(String role, String topic, String fallback) {
+        String cleanRole = clean(role);
+        String cleanTopic = clean(topic);
+        String cleanFallback = clean(fallback);
+        StringBuilder label = new StringBuilder();
+        if (!cleanRole.isEmpty()) label.append(cleanRole);
+        if (!cleanTopic.isEmpty() && !cleanTopic.equalsIgnoreCase(cleanRole)) {
+            appendSummaryPart(label, cleanTopic);
+        }
+        if (label.length() == 0 && !cleanFallback.isEmpty()) label.append(cleanFallback);
+        return label.toString();
+    }
+
+    private static void appendSummaryPart(StringBuilder summary, String part) {
+        String clean = clean(part);
+        if (clean.isEmpty()) return;
+        if (summary.length() > 0) summary.append(" · ");
+        summary.append(clean);
+    }
+
+    private static void appendMore(StringBuilder summary, int more) {
+        if (more <= 0) return;
+        appendSummaryPart(summary, "+" + more + " more");
+    }
+
+    private static String clean(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private static String countLabel(int active, int idle) {
