@@ -80,7 +80,7 @@ final class DualUsageNotificationManager {
         Icon refreshIcon = Icon.createWithResource(context, R.drawable.ic_refresh);
         RemoteViews compact = buildViews(context, R.layout.notification_usage_dual_bars,
                 fiveHour, longWindow, longLabel, observedAt, now, planText,
-                fiveResetTime, longResetTime, null, null, processMode);
+                fiveResetTime, longResetTime, processes, idleRoles, processMode);
         RemoteViews expanded = buildViews(context, R.layout.notification_usage_dual_bars_expanded,
                 fiveHour, longWindow, longLabel, observedAt, now, planText,
                 fiveResetTime, longResetTime, processes, idleRoles, processMode);
@@ -169,6 +169,16 @@ final class DualUsageNotificationManager {
             views.setViewVisibility(R.id.notification_plan_text, View.VISIBLE);
             views.setTextViewText(R.id.notification_plan_text, planText);
             views.setTextColor(R.id.notification_plan_text, textColor);
+        }
+
+        if (layoutId == R.layout.notification_usage_dual_bars) {
+            String processSummary = ProcessNotificationMode.COMBINED.equals(processMode)
+                    ? ProcessNotificationManager.collapsedSummary(processes, idleRoles, now)
+                    : "";
+            views.setViewVisibility(R.id.notification_process_summary,
+                    processSummary.isEmpty() ? View.GONE : View.VISIBLE);
+            views.setTextViewText(R.id.notification_process_summary, processSummary);
+            views.setTextColor(R.id.notification_process_summary, textColor);
         }
 
         if (fiveHour == null) {
