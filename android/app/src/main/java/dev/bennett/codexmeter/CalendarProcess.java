@@ -3,11 +3,15 @@ package dev.bennett.codexmeter;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** One active long-running process represented by a local calendar watchdog event. */
 final class CalendarProcess {
     static final String WATCHDOG_PREFIX = "GPT_WATCHDOG|urgent|";
     static final String METADATA_VERSION = "v1";
+    private static final Pattern METADATA_PAIR = Pattern.compile(
+            "(?is)(?:^|\\s)([a-z0-9_.-]+)\\s*=\\s*(.*?)(?=(?:\\s+[a-z0-9_.-]+\\s*=)|$)");
 
     final long eventId;
     final long beginMillis;
@@ -43,13 +47,15 @@ final class CalendarProcess {
     static Map<String, String> parseMetadata(String description) {
         Map<String, String> values = new LinkedHashMap<>();
         if (description == null || description.trim().isEmpty()) return values;
-        String[] lines = description.replace("\r", "").split("\n");
+
+        // Google Calendar normally preserves line breaks, but some local/sync/provider paths flatten
+        // DESCRIPTION into one whitespace-separated line. Parse key=value boundaries instead of
+        // assuming exactly one metadata pair per physical line so role/topic survive both forms.
+        Matcher matcher = METADATA_PAIR.matcher(description.replace('\r', ' '));
         boolean supported = false;
-        for (String line : lines) {
-            int split = line.indexOf('=');
-            if (split <= 0) continue;
-            String key = line.substring(0, split).trim().toLowerCase(Locale.ROOT);
-            String value = clean(line.substring(split + 1));
+        while (matcher.find()) {
+            String key = clean(matcher.group(1)).toLowerCase(Locale.ROOT);
+            String value = clean(matcher.group(2));
             if ("codex_meter_watchdog".equals(key)) {
                 supported = METADATA_VERSION.equalsIgnoreCase(value);
             } else if (!value.isEmpty()) {
