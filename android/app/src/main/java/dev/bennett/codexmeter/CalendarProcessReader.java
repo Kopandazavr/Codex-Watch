@@ -21,9 +21,22 @@ final class CalendarProcessReader {
     private CalendarProcessReader() {
     }
 
+    /**
+     * Returns all watchdog instances in the local observation window, including future ones.
+     * Future observation is intentional: it lets idle lifecycle state remember role/topic/event
+     * metadata before BEGIN so deleting a known watchdog early can still complete that role.
+     */
+    static List<CalendarProcess> observed(Context context, long nowMillis) {
+        return query(context, nowMillis);
+    }
+
     static List<CalendarProcess> active(Context context, long nowMillis) {
-        List<CalendarProcess> all = query(context, nowMillis);
+        return active(observed(context, nowMillis), nowMillis);
+    }
+
+    static List<CalendarProcess> active(List<CalendarProcess> all, long nowMillis) {
         List<CalendarProcess> processes = new ArrayList<>();
+        if (all == null) return processes;
         for (CalendarProcess process : all) {
             if (process.beginMillis <= nowMillis && process.endMillis > nowMillis) {
                 processes.add(process);
@@ -34,8 +47,12 @@ final class CalendarProcessReader {
     }
 
     static List<CalendarProcess> recentlyFinished(Context context, long nowMillis) {
-        List<CalendarProcess> all = query(context, nowMillis);
+        return recentlyFinished(observed(context, nowMillis), nowMillis);
+    }
+
+    static List<CalendarProcess> recentlyFinished(List<CalendarProcess> all, long nowMillis) {
         List<CalendarProcess> processes = new ArrayList<>();
+        if (all == null) return processes;
         for (CalendarProcess process : all) {
             if (process.endMillis <= nowMillis) processes.add(process);
         }
