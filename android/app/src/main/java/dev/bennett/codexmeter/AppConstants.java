@@ -14,6 +14,7 @@ public final class AppConstants {
             "dev.bennett.codexmeter.action.RESET_CREDIT_EXPIRY_ALERT";
     public static final String ACTION_RESET_CREDITS_UPDATED = "dev.bennett.codexmeter.action.RESET_CREDITS_UPDATED";
     public static final String ACTION_USAGE_UPDATED = "dev.bennett.codexmeter.action.USAGE_UPDATED";
+    // OAuth callback scheme is retained for compatibility with the existing registered OAuth client.
     public static final String APP_LINK = "codexmeter://auth/complete";
     public static final String AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
     public static final String AUTH_BASE = "https://auth.openai.com";
@@ -24,11 +25,12 @@ public final class AppConstants {
     public static final String EXTRA_NOTIFICATION_ID = "notification_id";
     public static final String EXTRA_PROMPT_USE_RESET = "prompt_use_reset";
     public static final String EXTRA_SUCCESS = "success";
+    // Internal Java namespace/permission lineage is intentionally retained during the app-id migration.
     public static final String INTERNAL_PERMISSION = "dev.bennett.codexmeter.permission.INTERNAL";
     public static final String OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
     public static final int[] OAUTH_PORTS = {1455, 1457};
     public static final String OAUTH_SCOPE = "openid profile email offline_access";
-    public static final String ORIGINATOR = "codex-meter-android";
+    public static final String ORIGINATOR = "codex-watch-android";
     public static final String RESET_CREDITS_CONSUME_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume";
     public static final String RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
     public static final String REVOKE_URL = "https://auth.openai.com/oauth/revoke";
