@@ -9,8 +9,24 @@ grep -q 'IdleProcessState.synchronize' "$SRC/DualUsageNotificationManager.java"
 grep -q 'dismissedThroughMillis' "$SRC/IdleProcessState.java"
 grep -q 'row.reminderEnabled = !row.reminderEnabled' "$SRC/IdleProcessState.java"
 
-# Once an event has been observed as active, deleting it is an early completion rather than
-# waiting for the stale scheduled END. Provider failures remain fail-safe (not false completion).
+# DESCRIPTION parsing accepts both canonical newline-separated metadata and provider-flattened
+# whitespace-separated key=value pairs so explicit role/topic survive local Calendar sync.
+grep -q 'METADATA_PAIR' "$SRC/CalendarProcess.java"
+grep -q 'Matcher matcher = METADATA_PAIR.matcher' "$SRC/CalendarProcess.java"
+test -f "$ROOT/tests/CalendarProcessSelfTest.java"
+
+# Future watchdogs are observed before BEGIN and persisted into idle lifecycle state. Once a known
+# event disappears, deletion is an early completion even if the event never reached the active list.
+grep -q 'static List<CalendarProcess> observed' "$SRC/CalendarProcessReader.java"
+grep -q 'CalendarProcessReader.observed(context, now)' "$SRC/DualUsageNotificationManager.java"
+grep -q 'CalendarProcessReader.active(observed, now)' "$SRC/DualUsageNotificationManager.java"
+grep -q 'CalendarProcessReader.recentlyFinished(observed, now)' "$SRC/DualUsageNotificationManager.java"
+grep -q 'synchronize(context, processes, finished, observed, now)' "$SRC/DualUsageNotificationManager.java"
+grep -q 'List<CalendarProcess> recentlyFinished, List<CalendarProcess> observed' "$SRC/IdleProcessState.java"
+grep -q 'rememberObserved(row, process)' "$SRC/IdleProcessState.java"
+
+# Once an event has been observed, deleting it is an early completion rather than waiting for the
+# stale scheduled END. Provider failures remain fail-safe (not false completion).
 grep -q 'static boolean eventExists' "$SRC/CalendarProcessReader.java"
 grep -q 'CalendarContract.Events.CONTENT_URI' "$SRC/CalendarProcessReader.java"
 grep -q '!CalendarProcessReader.eventExists(context, row.pendingEventId)' "$SRC/IdleProcessState.java"
@@ -58,5 +74,13 @@ grep -q 'app:isPreferenceVisible="false"' "$ROOT/app/src/main/res/xml/preference
 NOW_BAR_XML="$ROOT/app/src/main/res/xml/preferences_settings_now_bar.xml"
 grep -q 'android:title="Process notifications"' "$NOW_BAR_XML"
 grep -q 'app:viewType="noImage"' "$NOW_BAR_XML"
+
+# Run focused pure-Java metadata regression coverage without needing Android framework stubs.
+META_OUT="$ROOT/build/calendar-process-metadata-tests"
+rm -rf "$META_OUT" && mkdir -p "$META_OUT"
+javac -encoding UTF-8 -d "$META_OUT" \
+  "$SRC/CalendarProcess.java" \
+  "$ROOT/tests/CalendarProcessSelfTest.java"
+java -ea -cp "$META_OUT" dev.bennett.codexmeter.CalendarProcessSelfTest
 
 echo 'Idle reminder + phone follow-up source regression contract passed.'
