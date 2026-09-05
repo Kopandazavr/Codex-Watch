@@ -6,6 +6,7 @@ VERSION_NAME="$(awk -F'"' '/versionName = "/ { print $2; exit }' "$ROOT/app/buil
 [[ -n "$VERSION_NAME" ]] || { echo "Unable to read versionName from app/build.gradle.kts" >&2; exit 2; }
 DIST="$ROOT/dist"
 SIGNING_DIR="$ROOT/.local-signing"
+# Keep the established private test/release signing lineage; filenames/alias are internal.
 KEYSTORE="$SIGNING_DIR/codex-meter-local.p12"
 PASS_FILE="$SIGNING_DIR/password"
 
@@ -25,7 +26,7 @@ if [[ ! -f "$KEYSTORE" ]]; then
     -storetype PKCS12 \
     -keystore "$KEYSTORE" -storepass "$STORE_PASS" -keypass "$STORE_PASS" \
     -alias codexmeter -keyalg RSA -keysize 3072 -validity 10000 \
-    -dname "CN=Codex Meter Local Build, OU=Personal Android App, O=Local Build" \
+    -dname "CN=Codex Watch Local Build, OU=Personal Android App, O=Local Build" \
     >/dev/null 2>&1
 fi
 
@@ -35,11 +36,11 @@ fi
   --console=plain
 
 SOURCE_APK="$ROOT/app/build/outputs/apk/release/app-release.apk"
-OUT="$DIST/CodexMeter-$VERSION_NAME.apk"
+OUT="$DIST/CodexWatch-$VERSION_NAME.apk"
 cp "$SOURCE_APK" "$OUT"
 
 WEAR_SOURCE_APK="$ROOT/wear/build/outputs/apk/release/wear-release.apk"
-WEAR_OUT="$DIST/CodexMeter-Wear-$VERSION_NAME.apk"
+WEAR_OUT="$DIST/CodexWatch-Wear-$VERSION_NAME.apk"
 cp "$WEAR_SOURCE_APK" "$WEAR_OUT"
 
 APKSIGNER="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner | sort | tail -1)"
