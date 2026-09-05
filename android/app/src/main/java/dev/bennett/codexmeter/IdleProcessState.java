@@ -56,21 +56,35 @@ final class IdleProcessState {
 
     static List<IdleRole> synchronize(Context context, List<CalendarProcess> active,
             List<CalendarProcess> recentlyFinished, long nowMillis) {
+        return synchronize(context, active, recentlyFinished,
+                mergeObserved(active, recentlyFinished), nowMillis);
+    }
+
+    /**
+     * Synchronizes durable role state with every locally observed watchdog, not only active ones.
+     * Recording future watchdog metadata here is what preserves role/topic continuity when a known
+     * event is deleted before BEGIN and therefore never appears in the active list.
+     */
+    static List<IdleRole> synchronize(Context context, List<CalendarProcess> active,
+            List<CalendarProcess> recentlyFinished, List<CalendarProcess> observed,
+            long nowMillis) {
         if (context == null) return Collections.emptyList();
         Map<String, MutableRole> rows = load(context);
         Set<String> activeKeys = new HashSet<>();
+
+        if (observed != null) {
+            for (CalendarProcess process : observed) {
+                MutableRole row = rows.computeIfAbsent(roleKey(process), MutableRole::new);
+                rememberObserved(row, process);
+            }
+        }
+
         if (active != null) {
             for (CalendarProcess process : active) {
                 String key = roleKey(process);
                 activeKeys.add(key);
                 MutableRole row = rows.computeIfAbsent(key, MutableRole::new);
-                if (process.endMillis >= row.pendingEndMillis) {
-                    row.pendingEndMillis = process.endMillis;
-                    row.pendingEventId = process.eventId;
-                    row.project = clean(process.project);
-                    row.role = clean(process.role);
-                    row.topic = clean(process.topic);
-                }
+                rememberObserved(row, process);
             }
         }
         if (recentlyFinished != null) {
@@ -180,6 +194,24 @@ final class IdleProcessState {
             if (clean(key).equals(roleKey(process))) return true;
         }
         return false;
+    }
+
+    private static void rememberObserved(MutableRole row, CalendarProcess process) {
+        if (row == null || process == null) return;
+        if (process.endMillis < row.pendingEndMillis) return;
+        row.pendingEndMillis = process.endMillis;
+        row.pendingEventId = process.eventId;
+        row.project = clean(process.project);
+        row.role = clean(process.role);
+        row.topic = clean(process.topic);
+    }
+
+    private static List<CalendarProcess> mergeObserved(List<CalendarProcess> active,
+            List<CalendarProcess> recentlyFinished) {
+        List<CalendarProcess> merged = new ArrayList<>();
+        if (active != null) merged.addAll(active);
+        if (recentlyFinished != null) merged.addAll(recentlyFinished);
+        return merged;
     }
 
     private static void promoteFinished(MutableRole row, String project, String role,
