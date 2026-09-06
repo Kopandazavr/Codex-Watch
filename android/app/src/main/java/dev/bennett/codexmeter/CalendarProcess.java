@@ -10,6 +10,7 @@ import java.util.regex.Pattern;
 final class CalendarProcess {
     static final String WATCHDOG_PREFIX = "GPT_WATCHDOG|urgent|";
     static final String METADATA_VERSION = "v1";
+    static final long ACTIVE_WORK_WINDOW_MS = 27L * 60_000L;
     private static final Pattern METADATA_PAIR = Pattern.compile(
             "(?is)(?:^|\\s)([a-z0-9_.-]+)\\s*=\\s*(.*?)(?=(?:\\s+[a-z0-9_.-]+\\s*=)|$)");
 
@@ -65,8 +66,37 @@ final class CalendarProcess {
         return supported ? values : new LinkedHashMap<>();
     }
 
+    long workStartMillis() {
+        return Math.max(0L, beginMillis - ACTIVE_WORK_WINDOW_MS);
+    }
+
+    boolean isWorkRunning(long nowMillis) {
+        return nowMillis >= workStartMillis() && nowMillis < beginMillis;
+    }
+
+    boolean isWatchdogActive(long nowMillis) {
+        return nowMillis >= beginMillis && nowMillis < endMillis;
+    }
+
+    boolean isVisibleActive(long nowMillis) {
+        return nowMillis >= workStartMillis() && nowMillis < endMillis;
+    }
+
+    long remainingMillis(long nowMillis) {
+        long target = nowMillis < beginMillis ? beginMillis : endMillis;
+        return Math.max(0L, target - nowMillis);
+    }
+
     int remainingPercent(long nowMillis) {
-        if (nowMillis <= beginMillis) return 100;
+        if (nowMillis < beginMillis) {
+            long start = workStartMillis();
+            if (nowMillis <= start) return 100;
+            long duration = beginMillis - start;
+            long remaining = beginMillis - nowMillis;
+            if (duration <= 0L) return 0;
+            return (int) Math.max(0L, Math.min(100L,
+                    Math.round((remaining * 100.0d) / duration)));
+        }
         if (nowMillis >= endMillis) return 0;
         long duration = endMillis - beginMillis;
         long remaining = endMillis - nowMillis;
