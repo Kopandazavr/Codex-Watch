@@ -1,6 +1,6 @@
 package dev.bennett.codexmeter;
 
-/** Focused regression coverage for watchdog DESCRIPTION metadata parsing. */
+/** Focused regression coverage for watchdog metadata and canonical work timing. */
 public final class CalendarProcessSelfTest {
     private CalendarProcessSelfTest() {
     }
@@ -9,7 +9,8 @@ public final class CalendarProcessSelfTest {
         testMultilineMetadata();
         testFlattenedMetadata();
         testUnsupportedMetadataFallsBackSoft();
-        System.out.println("CalendarProcess metadata self-test passed.");
+        testCanonicalWorkWindow();
+        System.out.println("CalendarProcess metadata/timing self-test passed.");
     }
 
     private static void testMultilineMetadata() {
@@ -54,6 +55,31 @@ public final class CalendarProcessSelfTest {
         require("Title fallback".equals(process.project), "title fallback project");
         require(process.role.isEmpty(), "unsupported metadata role ignored");
         require(process.topic.isEmpty(), "unsupported metadata topic ignored");
+    }
+
+    private static void testCanonicalWorkWindow() {
+        long begin = CalendarProcess.ACTIVE_WORK_WINDOW_MS;
+        long end = begin + 5L * 60_000L;
+        CalendarProcess process = CalendarProcess.fromEvent(
+                45L,
+                "GPT_WATCHDOG|urgent|Codex Watch",
+                "codex_meter_watchdog=v1 project=Codex Watch role=Developer topic=implementation",
+                begin,
+                end);
+        require(process != null, "timed process parsed");
+        require(process.workStartMillis() == 0L, "work starts 27 minutes before BEGIN");
+        require(process.isVisibleActive(1L), "future watchdog is visible during work interval");
+        require(process.isWorkRunning(1L), "pre-BEGIN phase is work-running");
+        require(process.remainingPercent(0L) == 100, "work starts at 100 percent remaining");
+        require(process.remainingPercent(begin / 2L) == 50, "work midpoint is 50 percent remaining");
+        require(process.remainingMillis(begin / 2L) == begin / 2L,
+                "work remaining targets BEGIN");
+        require(process.isWatchdogActive(begin), "BEGIN enters watchdog window");
+        require(process.remainingPercent(begin) == 100,
+                "watchdog fallback window retains its own progress semantics");
+        require(process.remainingMillis(begin) == end - begin,
+                "post-BEGIN remaining targets END");
+        require(!process.isVisibleActive(end), "process is no longer active at END");
     }
 
     private static void require(boolean condition, String label) {
