@@ -35,11 +35,89 @@ final class DualUsageNotificationManager {
                 || !NowBarManager.canPostNotifications(context)) {
             return false;
         }
+        SurfaceState state = surfaceState(context, snapshot);
+        if (state == null) return false;
+        Notification notification = buildSurface(context, CHANNEL_ID, state,
+                "Codex usage", state.fallbackText, true);
+        NotificationManager manager = (NotificationManager)
+                context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null || notification == null) return false;
+        try {
+            manager.notify(NOTIFICATION_ID, notification);
+            ProcessNotificationManager.sync(context, state.processes, state.idleRoles,
+                    state.processMode, state.now);
+            DiagnosticLog.info(context, "now_bar", "dual_notification_posted",
+                    "five_hour", state.fiveHour != null,
+                    "long_window", state.longWindow != null,
+                    "plan_expiry", state.subscription != null
+                            && state.subscription.activeUntilMillis > 0L,
+                    "five_hour_reset", state.fiveHour != null && !state.fiveResetTime.isEmpty(),
+                    "long_reset", state.longWindow != null && !state.longResetTime.isEmpty(),
+                    "process_count", state.processes.size(),
+                    "idle_count", state.idleRoles.size(),
+                    "process_mode", state.processMode);
+            return true;
+        } catch (RuntimeException exception) {
+            DiagnosticLog.error(context, "now_bar", "dual_notification_post_failed", exception);
+            return false;
+        }
+    }
+
+    /**
+     * Produces an attention event by updating the existing usage notification ID on an alerting
+     * channel. The caller restores the normal silent/live channel shortly afterwards, so no extra
+     * persistent alert card is left behind.
+     */
+    static boolean realertUsageSurface(Context context, String alertChannelId,
+            String alertTitle, String alertText) {
+        if (context == null || alertChannelId == null || !NowBarManager.isActive(context)) {
+            return false;
+        }
+        UsageSnapshot snapshot = AppPreferences.loadSnapshot(context);
+        if (snapshot == null) return false;
+        SurfaceState state = surfaceState(context, snapshot);
+        if (state == null) return false;
+        Notification notification = buildSurface(context, alertChannelId, state,
+                alertTitle == null ? "Codex usage" : alertTitle,
+                alertText == null ? state.fallbackText : alertText, false);
+        NotificationManager manager = (NotificationManager)
+                context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null || notification == null) return false;
+        try {
+            manager.notify(NOTIFICATION_ID, notification);
+            DiagnosticLog.info(context, "now_bar", "usage_surface_realerted",
+                    "channel", alertChannelId,
+                    "process_mode", state.processMode);
+            return true;
+        } catch (RuntimeException exception) {
+            DiagnosticLog.error(context, "now_bar", "usage_surface_realert_failed", exception);
+            return false;
+        }
+    }
+
+    static boolean repostFromCache(Context context) {
+        if (context == null) return false;
+        if (!NowBarManager.isActive(context)) {
+            ProcessNotificationManager.clearAll(context);
+            return false;
+        }
+        UsageSnapshot snapshot = AppPreferences.loadSnapshot(context);
+        return snapshot != null && postFromSnapshot(context, snapshot);
+    }
+
+    static void repostDelayed(Context context, long delayMillis) {
+        if (context == null) return;
+        Context app = context.getApplicationContext();
+        new Handler(Looper.getMainLooper()).postDelayed(
+                () -> repostFromCache(app), Math.max(0L, delayMillis));
+    }
+
+    private static SurfaceState surfaceState(Context context, UsageSnapshot snapshot) {
         long now = System.currentTimeMillis();
         long observedAt = snapshot.fetchedAtMillis;
         UsageWindow fiveHour = UsageSnapshot.currentWindow(snapshot.fiveHour, observedAt, now);
         UsageWindow longWindow = UsageSnapshot.currentWindow(snapshot.longWindow(), observedAt, now);
-        if (fiveHour == null && longWindow == null) return false;
+        if (fiveHour == null && longWindow == null) return null;
 
         String longLabel = snapshot.longWindowIsMonthly() ? "Monthly" : "Weekly";
         String focus = NowBarManager.activeFocusMetric(context);
@@ -61,7 +139,17 @@ final class DualUsageNotificationManager {
         }
         SubscriptionInfo subscription = SubscriptionStore.load(context);
         String planText = formatSubscription(subscription);
+        String fiveText = NowBarCopy.limitText("5-hour", fiveHour, observedAt, now);
+        String longText = NowBarCopy.limitText(longLabel, longWindow, observedAt, now);
+        String fallbackText = fiveText + " · " + longText
+                + (longResetTime.isEmpty() ? "" : " · " + longLabel + " reset: " + longResetTime);
+        return new SurfaceState(now, observedAt, fiveHour, longWindow, longLabel, focus,
+                paceWindow, fiveResetTime, longResetTime, processMode, processes, idleRoles,
+                subscription, planText, fallbackText, snapshot.longWindowIsMonthly());
+    }
 
+    private static Notification buildSurface(Context context, String channelId, SurfaceState state,
+            String title, String text, boolean onlyAlertOnce) {
         Intent open = new Intent(context, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent contentIntent = PendingIntent.getActivity(context, REQUEST_CONTENT, open,
@@ -79,78 +167,47 @@ final class DualUsageNotificationManager {
         Icon stopIcon = Icon.createWithResource(context, R.drawable.ic_notification);
         Icon refreshIcon = Icon.createWithResource(context, R.drawable.ic_refresh);
         RemoteViews compact = buildViews(context, R.layout.notification_usage_dual_bars,
-                fiveHour, longWindow, longLabel, observedAt, now, planText,
-                fiveResetTime, longResetTime, processes, idleRoles, processMode);
+                state.fiveHour, state.longWindow, state.longLabel, state.observedAt, state.now,
+                state.planText, state.fiveResetTime, state.longResetTime, state.processes,
+                state.idleRoles, state.processMode);
         RemoteViews expanded = buildViews(context, R.layout.notification_usage_dual_bars_expanded,
-                fiveHour, longWindow, longLabel, observedAt, now, planText,
-                fiveResetTime, longResetTime, processes, idleRoles, processMode);
+                state.fiveHour, state.longWindow, state.longLabel, state.observedAt, state.now,
+                state.planText, state.fiveResetTime, state.longResetTime, state.processes,
+                state.idleRoles, state.processMode);
 
-        String fiveText = NowBarCopy.limitText("5-hour", fiveHour, observedAt, now);
-        String longText = NowBarCopy.limitText(longLabel, longWindow, observedAt, now);
-        String fallbackText = fiveText + " · " + longText
-                + (longResetTime.isEmpty() ? "" : " · " + longLabel + " reset: " + longResetTime);
-        Notification.Builder builder = new Notification.Builder(context, CHANNEL_ID)
+        Notification.Builder builder = new Notification.Builder(context, channelId)
                 .setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle("Codex usage")
-                .setContentText(fallbackText)
+                .setContentTitle(title)
+                .setContentText(text)
                 .setContentIntent(contentIntent)
                 .setDeleteIntent(dismissedIntent)
                 .setOngoing(true)
-                .setOnlyAlertOnce(true)
+                .setOnlyAlertOnce(onlyAlertOnce)
                 .setCategory(Notification.CATEGORY_STATUS)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setColor(Color.rgb(3, 129, 254))
                 .setShowWhen(false)
+                .setGroup(NotificationSurfaceContract.GROUP_KEY)
+                .setSortKey(NotificationSurfaceContract.SORT_USAGE)
                 .setStyle(new Notification.DecoratedCustomViewStyle())
                 .setCustomContentView(compact)
                 .setCustomBigContentView(expanded)
                 .addAction(new Notification.Action.Builder(stopIcon, "Stop", stopIntent).build())
                 .addAction(new Notification.Action.Builder(refreshIcon, "Refresh", refreshIntent).build());
 
-        boolean weeklyFocus = NowBarPercentMode.isWeeklyFocus(focus);
+        boolean weeklyFocus = NowBarPercentMode.isWeeklyFocus(state.focus);
         String reminderMetric = weeklyFocus
-                ? (snapshot.longWindowIsMonthly() ? "monthly" : "weekly") : "five_hour";
+                ? (state.longWindowIsMonthly ? "monthly" : "weekly") : "five_hour";
         Notification.Action reminder = NowBarResetReminder.buildAction(
-                context, reminderMetric, paceWindow, observedAt);
+                context, reminderMetric, state.paceWindow, state.observedAt);
         if (reminder != null) builder.addAction(reminder);
-
-        NotificationManager manager = (NotificationManager)
-                context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager == null) return false;
         try {
-            manager.notify(NOTIFICATION_ID, builder.build());
-            ProcessNotificationManager.sync(context, processes, idleRoles, processMode, now);
-            DiagnosticLog.info(context, "now_bar", "dual_notification_posted",
-                    "five_hour", fiveHour != null,
-                    "long_window", longWindow != null,
-                    "plan_expiry", subscription != null && subscription.activeUntilMillis > 0L,
-                    "five_hour_reset", fiveHour != null && !fiveResetTime.isEmpty(),
-                    "long_reset", longWindow != null && !longResetTime.isEmpty(),
-                    "process_count", processes.size(),
-                    "idle_count", idleRoles.size(),
-                    "process_mode", processMode);
-            return true;
+            return builder.build();
         } catch (RuntimeException exception) {
-            DiagnosticLog.error(context, "now_bar", "dual_notification_post_failed", exception);
-            return false;
+            DiagnosticLog.error(context, "now_bar", "dual_notification_build_failed", exception,
+                    "channel", channelId);
+            return null;
         }
-    }
-
-    static boolean repostFromCache(Context context) {
-        if (context == null) return false;
-        if (!NowBarManager.isActive(context)) {
-            ProcessNotificationManager.clearAll(context);
-            return false;
-        }
-        UsageSnapshot snapshot = AppPreferences.loadSnapshot(context);
-        return snapshot != null && postFromSnapshot(context, snapshot);
-    }
-
-    static void repostDelayed(Context context, long delayMillis) {
-        if (context == null) return;
-        Context app = context.getApplicationContext();
-        new Handler(Looper.getMainLooper()).postDelayed(
-                () -> repostFromCache(app), Math.max(0L, delayMillis));
     }
 
     private static RemoteViews buildViews(Context context, int layoutId,
@@ -236,5 +293,47 @@ final class DualUsageNotificationManager {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm",
                 Locale.getDefault()).withZone(ZoneId.systemDefault());
         return plan + " · до " + formatter.format(Instant.ofEpochMilli(info.activeUntilMillis));
+    }
+
+    private static final class SurfaceState {
+        final long now;
+        final long observedAt;
+        final UsageWindow fiveHour;
+        final UsageWindow longWindow;
+        final String longLabel;
+        final String focus;
+        final UsageWindow paceWindow;
+        final String fiveResetTime;
+        final String longResetTime;
+        final String processMode;
+        final List<CalendarProcess> processes;
+        final List<IdleProcessState.IdleRole> idleRoles;
+        final SubscriptionInfo subscription;
+        final String planText;
+        final String fallbackText;
+        final boolean longWindowIsMonthly;
+
+        SurfaceState(long now, long observedAt, UsageWindow fiveHour, UsageWindow longWindow,
+                String longLabel, String focus, UsageWindow paceWindow, String fiveResetTime,
+                String longResetTime, String processMode, List<CalendarProcess> processes,
+                List<IdleProcessState.IdleRole> idleRoles, SubscriptionInfo subscription,
+                String planText, String fallbackText, boolean longWindowIsMonthly) {
+            this.now = now;
+            this.observedAt = observedAt;
+            this.fiveHour = fiveHour;
+            this.longWindow = longWindow;
+            this.longLabel = longLabel;
+            this.focus = focus;
+            this.paceWindow = paceWindow;
+            this.fiveResetTime = fiveResetTime;
+            this.longResetTime = longResetTime;
+            this.processMode = processMode;
+            this.processes = processes;
+            this.idleRoles = idleRoles;
+            this.subscription = subscription;
+            this.planText = planText;
+            this.fallbackText = fallbackText;
+            this.longWindowIsMonthly = longWindowIsMonthly;
+        }
     }
 }
