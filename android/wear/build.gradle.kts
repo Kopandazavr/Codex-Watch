@@ -3,6 +3,7 @@ plugins {
 }
 
 android {
+    // Internal Java namespace is intentionally retained for this bounded migration.
     namespace = "dev.bennett.codexmeter"
     compileSdk {
         version = release(37) {
@@ -11,11 +12,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "dev.bennett.codexmeter"
+        applicationId = "dev.kopandazavr.codexwatch"
         minSdk = 30
         targetSdk = 36
-        versionCode = 30
-        versionName = "2.8.0"
+        versionCode = 31
+        versionName = "2.9.0"
     }
 
     signingConfigs {

@@ -3,15 +3,16 @@ plugins {
 }
 
 android {
+    // Internal Java namespace is intentionally retained for this bounded migration.
     namespace = "dev.bennett.codexmeter"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "dev.bennett.codexmeter"
+        applicationId = "dev.kopandazavr.codexwatch"
         minSdk = 26
         targetSdk = 36
-        versionCode = 30
-        versionName = "2.8.0"
+        versionCode = 31
+        versionName = "2.9.0"
         providers.gradleProperty("demoVersionCode").orNull?.toIntOrNull()?.let {
             versionCode = it
         }
@@ -19,7 +20,9 @@ android {
             versionName = it
         }
         val updateApiUrl = providers.gradleProperty("demoUpdateUrl").orNull
-            ?: "https://api.github.com/repos/BenItBuhner/Codex-Meter/releases?per_page=30" // pragma: allowlist secret
+            ?: "https://api.github.com/repos/Kopandazavr/Codex-Watch/releases?per_page=30" // pragma: allowlist secret
+        // Migration provenance only; the active updater target above is canonical.
+        // Previous fork target: Kopandazavr/Codex-Meter/releases?per_page=30
         buildConfigField("String", "UPDATE_API_URL",
             "\"${updateApiUrl.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
     }

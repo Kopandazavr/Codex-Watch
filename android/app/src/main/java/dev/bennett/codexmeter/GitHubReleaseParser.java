@@ -36,7 +36,8 @@ public final class GitHubReleaseParser {
             if (version == null || versions.contains(version.normalized())) {
                 continue;
             }
-            String expectedApk = "CodexMeter-" + version.normalized() + ".apk";
+            String expectedApk = "CodexWatch-" + version.normalized() + ".apk";
+            String legacyApk = "CodexMeter-" + version.normalized() + ".apk";
             JSONObject apk = null;
             JSONObject checksum = null;
             JSONArray assets = release.optJSONArray("assets");
@@ -49,6 +50,9 @@ public final class GitHubReleaseParser {
                     String assetName = asset.optString("name", "");
                     if (expectedApk.equals(assetName)) {
                         apk = asset;
+                    } else if (apk == null && legacyApk.equals(assetName)) {
+                        // Preserve read compatibility with imported pre-rename release history.
+                        apk = asset;
                     } else if ("SHA256SUMS.txt".equals(assetName)) {
                         checksum = asset;
                     }
@@ -57,6 +61,7 @@ public final class GitHubReleaseParser {
             if (apk == null || checksum == null) {
                 continue;
             }
+            String resolvedApkName = clean(apk.optString("name", ""), 180);
             String apkUrl = apk.optString("browser_download_url", "");
             String checksumUrl = checksum.optString("browser_download_url", "");
             String pageUrl = release.optString("html_url", "");
@@ -71,14 +76,14 @@ public final class GitHubReleaseParser {
             }
             String releaseName = clean(release.optString("name", ""), 160);
             if (releaseName.isEmpty()) {
-                releaseName = "Codex Meter " + version.normalized();
+                releaseName = "Codex Watch " + version.normalized();
             }
             String notes = clean(release.optString("body", ""), MAX_NOTES);
             boolean prerelease = release.optBoolean("prerelease", false)
                     || version.isPrerelease();
             versions.add(version.normalized());
             parsed.add(new GitHubRelease(version.normalized(), tag, releaseName, notes,
-                    clean(release.optString("published_at", ""), 80), pageUrl, expectedApk,
+                    clean(release.optString("published_at", ""), 80), pageUrl, resolvedApkName,
                     apkUrl, apkSize, checksumUrl, prerelease));
         }
         parsed.sort(new Comparator<GitHubRelease>() {
