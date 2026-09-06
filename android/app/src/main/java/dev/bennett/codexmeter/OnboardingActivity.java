@@ -10,6 +10,9 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -207,8 +210,10 @@ public final class OnboardingActivity extends AppCompatActivity {
         String accountState = accountSummary();
         CardItemView account = Ui.actionRow(this, "ChatGPT account", accountState,
                 R.drawable.ic_oui_contact_outline, view -> startSignIn());
-        setMatchingTextColor(account, accountState,
-                SecureTokenStore.isSignedIn(this) ? statusGreen() : statusRed());
+        boolean signedIn = SecureTokenStore.isSignedIn(this);
+        setStatusTokenColor(account, accountState,
+                signedIn ? "Connected" : "Not connected",
+                signedIn ? statusGreen() : statusRed());
         addSetupRow(setup, account, true);
 
         String notificationState = notificationSummary();
@@ -267,6 +272,27 @@ public final class OnboardingActivity extends AppCompatActivity {
             ViewGroup group = (ViewGroup) view;
             for (int index = 0; index < group.getChildCount(); index++) {
                 setMatchingTextColor(group.getChildAt(index), text, color);
+            }
+        }
+    }
+
+    private void setStatusTokenColor(View view, String text, String token, int color) {
+        if (view instanceof TextView) {
+            TextView label = (TextView) view;
+            if (text.contentEquals(label.getText())) {
+                int start = text.indexOf(token);
+                if (start >= 0) {
+                    SpannableString styled = new SpannableString(text);
+                    styled.setSpan(new ForegroundColorSpan(color), start, start + token.length(),
+                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    label.setText(styled);
+                }
+            }
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int index = 0; index < group.getChildCount(); index++) {
+                setStatusTokenColor(group.getChildAt(index), text, token, color);
             }
         }
     }
