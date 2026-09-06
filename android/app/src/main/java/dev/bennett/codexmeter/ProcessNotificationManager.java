@@ -49,11 +49,52 @@ final class ProcessNotificationManager {
                 return;
             }
             manager.notify(GROUPED_NOTIFICATION_ID,
-                    buildNotification(context, processes, idleRoles, "Processes", nowMillis));
+                    buildNotification(context, processes, idleRoles, "Processes", nowMillis,
+                            CHANNEL_ID, NotificationSurfaceContract.SORT_PROCESSES, true));
             return;
         }
         manager.cancel(GROUPED_NOTIFICATION_ID);
         syncPerProcess(context, manager, processes, idleRoles, nowMillis);
+    }
+
+    /**
+     * Re-alerts the persistent surface that already owns an idle role. This deliberately reuses
+     * the same notification ID instead of creating a second long-lived reminder card.
+     */
+    static boolean reAlertIdleReminder(Context context, IdleProcessState.IdleRole idle,
+            String alertChannelId, long nowMillis) {
+        if (context == null || idle == null || alertChannelId == null) return false;
+        String mode = ProcessNotificationMode.current(context);
+        if (ProcessNotificationMode.COMBINED.equals(mode)) {
+            return DualUsageNotificationManager.realertUsageSurface(context, alertChannelId,
+                    idle.displayLabel() + " is idle",
+                    "Idle reminder · " + formatIdle(nowMillis - idle.lastFinishedMillis));
+        }
+        NotificationManager manager = (NotificationManager)
+                context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null) return false;
+        List<CalendarProcess> observed = CalendarProcessReader.observed(context, nowMillis);
+        List<CalendarProcess> active = CalendarProcessReader.active(observed, nowMillis);
+        List<CalendarProcess> finished = CalendarProcessReader.recentlyFinished(observed, nowMillis);
+        List<IdleProcessState.IdleRole> idleRoles =
+                IdleProcessState.synchronize(context, active, finished, observed, nowMillis);
+        try {
+            if (ProcessNotificationMode.GROUPED.equals(mode)) {
+                manager.notify(GROUPED_NOTIFICATION_ID,
+                        buildNotification(context, active, idleRoles, "Processes", nowMillis,
+                                alertChannelId, NotificationSurfaceContract.SORT_PROCESSES, false));
+            } else {
+                manager.notify(idleNotificationId(idle.key),
+                        buildNotification(context, Collections.emptyList(),
+                                Collections.singletonList(idle), idle.displayLabel(), nowMillis,
+                                alertChannelId, NotificationSurfaceContract.sortRole(idle.key), false));
+            }
+            return true;
+        } catch (RuntimeException exception) {
+            DiagnosticLog.error(context, "idle_process", "persistent_surface_realert_failed",
+                    exception, "role", idle.displayLabel());
+            return false;
+        }
     }
 
     static void clearAll(Context context) {
@@ -92,7 +133,7 @@ final class ProcessNotificationManager {
             StringBuilder summary = new StringBuilder(compactLabel(
                     process.role, process.topic, process.project));
             appendSummaryPart(summary, process.remainingPercent(nowMillis) + "%");
-            appendSummaryPart(summary, formatRemaining(process.endMillis - nowMillis));
+            appendSummaryPart(summary, formatRemaining(process.remainingMillis(nowMillis)));
             appendMore(summary, total - 1);
             return summary.toString();
         }
@@ -115,10 +156,11 @@ final class ProcessNotificationManager {
             for (CalendarProcess process : processes) {
                 int id = notificationId(process);
                 nextIds.add(String.valueOf(id));
+                String key = IdleProcessState.roleKey(process);
                 manager.notify(id, buildNotification(context,
                         Collections.singletonList(process), Collections.emptyList(),
                         process.project.isEmpty() ? "Active process" : process.project,
-                        nowMillis));
+                        nowMillis, CHANNEL_ID, NotificationSurfaceContract.sortRole(key), true));
             }
         }
         if (idleRoles != null) {
@@ -127,7 +169,8 @@ final class ProcessNotificationManager {
                 nextIds.add(String.valueOf(id));
                 manager.notify(id, buildNotification(context,
                         Collections.emptyList(), Collections.singletonList(idle),
-                        idle.displayLabel(), nowMillis));
+                        idle.displayLabel(), nowMillis, CHANNEL_ID,
+                        NotificationSurfaceContract.sortRole(idle.key), true));
             }
         }
         SharedPreferences preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -157,7 +200,8 @@ final class ProcessNotificationManager {
     }
 
     private static Notification buildNotification(Context context, List<CalendarProcess> processes,
-            List<IdleProcessState.IdleRole> idleRoles, String title, long nowMillis) {
+            List<IdleProcessState.IdleRole> idleRoles, String title, long nowMillis,
+            String channelId, String sortKey, boolean onlyAlertOnce) {
         Intent open = new Intent(context, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent contentIntent = PendingIntent.getActivity(context, REQUEST_CONTENT, open,
@@ -178,17 +222,19 @@ final class ProcessNotificationManager {
                 processes, idleRoles, nowMillis);
 
         String content = summary.isEmpty() ? countLabel(activeCount, idleCount) : summary;
-        return new Notification.Builder(context, CHANNEL_ID)
+        return new Notification.Builder(context, channelId)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle(title)
                 .setContentText(content)
                 .setContentIntent(contentIntent)
                 .setOngoing(true)
-                .setOnlyAlertOnce(true)
+                .setOnlyAlertOnce(onlyAlertOnce)
                 .setCategory(Notification.CATEGORY_PROGRESS)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setColor(Color.rgb(3, 129, 254))
                 .setShowWhen(false)
+                .setGroup(NotificationSurfaceContract.GROUP_KEY)
+                .setSortKey(sortKey)
                 .setStyle(new Notification.DecoratedCustomViewStyle())
                 .setCustomContentView(compact)
                 .setCustomBigContentView(expanded)
@@ -215,7 +261,7 @@ final class ProcessNotificationManager {
         row.setTextViewText(R.id.notification_process_title, process.displayLabel());
         row.setTextColor(R.id.notification_process_title, textColor);
         row.setTextViewText(R.id.notification_process_remaining,
-                formatRemaining(process.endMillis - nowMillis));
+                formatRemaining(process.remainingMillis(nowMillis)));
         row.setTextColor(R.id.notification_process_remaining, textColor);
         row.setProgressBar(R.id.notification_process_progress, 100,
                 process.remainingPercent(nowMillis), false);
