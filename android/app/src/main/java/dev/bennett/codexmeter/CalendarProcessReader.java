@@ -38,11 +38,9 @@ final class CalendarProcessReader {
         List<CalendarProcess> processes = new ArrayList<>();
         if (all == null) return processes;
         for (CalendarProcess process : all) {
-            if (process.beginMillis <= nowMillis && process.endMillis > nowMillis) {
-                processes.add(process);
-            }
+            if (process.isVisibleActive(nowMillis)) processes.add(process);
         }
-        processes.sort(Comparator.comparingLong(process -> process.endMillis));
+        processes.sort(Comparator.comparingLong(process -> process.beginMillis));
         return processes;
     }
 
