@@ -1,16 +1,13 @@
 package dev.bennett.codexmeter;
 
 import android.app.AlarmManager;
-import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.graphics.Color;
 import android.os.Build;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -27,6 +24,7 @@ final class IdleReminderManager {
     private static final String PREFS = "codex_idle_reminder_scheduler_v1";
     private static final String KEY_ENABLED_KEYS = "enabled_role_keys";
     private static final String CHANNEL_ID = "codex_idle_reminders_v1";
+    // Legacy separate reminder IDs are retained only so old cards can be cleaned up.
     private static final int NOTIFICATION_BASE = 31000;
     private static final int REQUEST_BASE = 41000;
 
@@ -106,21 +104,36 @@ final class IdleReminderManager {
         }
 
         boolean overlayShown = IdleReminderOverlayService.show(context, idle);
-        if (!overlayShown) showFallbackNotification(context, idle, now);
+        NotificationManager manager = (NotificationManager)
+                context.getSystemService(Context.NOTIFICATION_SERVICE);
+        boolean persistentSurfaceAlerted = false;
+        if (manager != null) {
+            ensureChannel(manager);
+            persistentSurfaceAlerted = ProcessNotificationManager.reAlertIdleReminder(
+                    context, idle, CHANNEL_ID, now);
+            // Restore the canonical live/process channel after the attention event; the ID stays
+            // the same throughout, so no second long-lived reminder card appears.
+            if (persistentSurfaceAlerted) {
+                DualUsageNotificationManager.repostDelayed(context, 5_000L);
+            }
+        }
         long next = now + IdleProcessState.cadenceMillis(context);
         IdleProcessState.setNextReminderAt(context, key, next);
         scheduleAt(context, idle, next);
         DiagnosticLog.info(context, "idle_process", "reminder_fired",
-                "role", idle.displayLabel(), "overlay", overlayShown);
+                "role", idle.displayLabel(),
+                "overlay", overlayShown,
+                "persistent_surface_alerted", persistentSurfaceAlerted);
     }
 
     static void restore(Context context) {
         if (context == null) return;
         long now = System.currentTimeMillis();
-        List<CalendarProcess> active = CalendarProcessReader.active(context, now);
-        List<CalendarProcess> finished = CalendarProcessReader.recentlyFinished(context, now);
+        List<CalendarProcess> observed = CalendarProcessReader.observed(context, now);
+        List<CalendarProcess> active = CalendarProcessReader.active(observed, now);
+        List<CalendarProcess> finished = CalendarProcessReader.recentlyFinished(observed, now);
         List<IdleProcessState.IdleRole> visible =
-                IdleProcessState.synchronize(context, active, finished, now);
+                IdleProcessState.synchronize(context, active, finished, observed, now);
         Set<String> keys = enabledKeys(context);
         for (String key : new HashSet<>(keys)) {
             IdleProcessState.IdleRole idle = IdleProcessState.find(context, key);
@@ -202,33 +215,10 @@ final class IdleReminderManager {
         }
     }
 
-    private static void showFallbackNotification(Context context, IdleProcessState.IdleRole idle,
-            long nowMillis) {
-        NotificationManager manager = (NotificationManager)
-                context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager == null || !NowBarManager.canPostNotifications(context)) return;
-        ensureChannel(manager);
-        String text = "Idle for " + formatIdle(nowMillis - idle.lastFinishedMillis)
-                + " · tap the process card to manage reminders";
-        PendingIntent open = PendingIntent.getActivity(context, requestCode(idle.key, 4),
-                new Intent(context, SettingsActivity.class)
-                        .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP),
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        manager.notify(notificationId(idle.key), new Notification.Builder(context, CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle(idle.displayLabel() + " is idle")
-                .setContentText(text)
-                .setContentIntent(open)
-                .setAutoCancel(true)
-                .setCategory(Notification.CATEGORY_REMINDER)
-                .setVisibility(Notification.VISIBILITY_PRIVATE)
-                .setColor(Color.rgb(3, 129, 254))
-                .build());
-    }
-
     private static void dismissSurface(Context context, String key) {
         NotificationManager manager = (NotificationManager)
                 context.getSystemService(Context.NOTIFICATION_SERVICE);
+        // Clean any legacy separate reminder card left by an older build/runtime.
         if (manager != null) manager.cancel(notificationId(key));
         IdleReminderOverlayService.dismiss(context, key);
     }
@@ -260,13 +250,5 @@ final class IdleReminderManager {
     private static int notificationId(String key) {
         int hash = key == null ? 0 : key.hashCode() & 0x7fffffff;
         return NOTIFICATION_BASE + (hash % 9000);
-    }
-
-    private static String formatIdle(long millis) {
-        long minutes = Math.max(1L, millis / 60_000L);
-        if (minutes < 60L) return minutes + "m";
-        long hours = minutes / 60L;
-        long rest = minutes % 60L;
-        return rest == 0L ? hours + "h" : hours + "h " + rest + "m";
     }
 }
