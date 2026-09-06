@@ -2,12 +2,19 @@ package dev.bennett.codexmeter;
 
 import android.app.Activity;
 import android.app.Application;
+import android.app.NotificationManager;
 import android.content.ComponentCallbacks2;
+import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
 
 /** Installs process/screen diagnostics and enforces the small app's canonical automatic defaults. */
 public final class CodexMeterApplication extends Application
         implements Application.ActivityLifecycleCallbacks {
+    private static final String RECONCILE_PREFS = "codex_notification_reconcile_v1";
+    private static final String KEY_LAST_UPDATE_TIME = "last_update_time";
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -15,6 +22,8 @@ public final class CodexMeterApplication extends Application
         DiagnosticLog.install(this);
         registerActivityLifecycleCallbacks(this);
         DiagnosticLog.info(this, "process", "application_started");
+        reconcileNotificationSurfacesAfterInstallOrUpdate();
+        IdleReminderManager.restore(this);
         DualUsageNotificationManager.repostDelayed(this, 350L);
     }
 
@@ -28,6 +37,43 @@ public final class CodexMeterApplication extends Application
         if (!UsagePacePreferences.isEnabled(this)) {
             UsagePacePreferences.setEnabled(this, true);
         }
+    }
+
+    /**
+     * PackageInfo.lastUpdateTime changes on every installed APK replacement, even when a
+     * development build deliberately keeps the same versionCode. That makes it a better
+     * first-reconciliation marker than versionCode for the persistent test lineage.
+     */
+    private void reconcileNotificationSurfacesAfterInstallOrUpdate() {
+        long installedAt;
+        try {
+            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            installedAt = info.lastUpdateTime;
+        } catch (PackageManager.NameNotFoundException | RuntimeException exception) {
+            DiagnosticLog.warn(this, "notification_surface", "install_marker_read_failed",
+                    "error", exception.getClass().getSimpleName());
+            return;
+        }
+        SharedPreferences state = getSharedPreferences(RECONCILE_PREFS, MODE_PRIVATE);
+        long previous = state.getLong(KEY_LAST_UPDATE_TIME, 0L);
+        if (previous == installedAt) return;
+
+        NotificationManager manager = (NotificationManager)
+                getSystemService(NOTIFICATION_SERVICE);
+        if (manager != null) {
+            try {
+                // App-scoped cancelAll removes old usage/process/reminder/alert cards left by the
+                // previous runtime. The delayed state-driven repost below rebuilds only valid ones.
+                manager.cancelAll();
+            } catch (RuntimeException exception) {
+                DiagnosticLog.warn(this, "notification_surface", "install_clear_failed",
+                        "error", exception.getClass().getSimpleName());
+            }
+        }
+        state.edit().putLong(KEY_LAST_UPDATE_TIME, installedAt).apply();
+        DiagnosticLog.info(this, "notification_surface", "install_reconciled",
+                "previous_update", previous,
+                "current_update", installedAt);
     }
 
     @Override
