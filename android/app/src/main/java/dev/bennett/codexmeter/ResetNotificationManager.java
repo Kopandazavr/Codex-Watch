@@ -376,6 +376,16 @@ public final class ResetNotificationManager {
         if (manager == null) return false;
         String channel = createChannel(manager, ResetAlertPreferences.getStyle(context));
         if (!canPost(context, manager, channel)) return false;
+
+        // While the live monitor owns the usage/limits surface, attention must update/re-alert that
+        // exact persistent ID instead of leaving a second low/reset/refill card in the shade.
+        if (NowBarManager.isActive(context)) {
+            boolean alerted = DualUsageNotificationManager.realertUsageSurface(
+                    context, channel, title, text);
+            if (alerted) DualUsageNotificationManager.repostDelayed(context, 5_000L);
+            return alerted;
+        }
+
         PendingIntent contentIntent = PendingIntent.getActivity(context, requestCode,
                 new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP
                         | Intent.FLAG_ACTIVITY_SINGLE_TOP),
